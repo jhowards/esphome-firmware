@@ -3,6 +3,9 @@
 #ifdef USE_ESP32
 
 
+#include <algorithm>
+#include <array>
+
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -23,6 +26,9 @@ static const ssize_t TASK_PRIORITY = 17;
 static const int32_t DC_OFFSET_MOVING_AVERAGE_COEFFICIENT_DENOMINATOR = 1000;
 
 static const char *const TAG = "i2s_audio.sat1_microphone";
+
+static constexpr std::array<int32_t, Sat1Microphone::DECIMATION_FACTOR> DECIMATION_KERNEL = {1, 2, 1};
+static constexpr int32_t DECIMATION_NORMALISATION = 4;
 
 enum MicrophoneEventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // stops the microphone task, set and cleared by ``loop``
@@ -163,6 +169,8 @@ void Sat1Microphone::configure_stream_settings_() {
 #endif
   //report 16kHz sample rate, as the 48kHz i2s samples will be subsampled to 16kHz
   this->audio_stream_info_ = audio::AudioStreamInfo(bits_per_sample, channel_count, 16000);
+
+  this->reset_filters_();
 }
 
 
@@ -229,6 +237,50 @@ void Sat1Microphone::fix_dc_offset_(std::vector<uint8_t> &data) {
                          DC_OFFSET_MOVING_AVERAGE_COEFFICIENT_DENOMINATOR;
 }
 
+void Sat1Microphone::reset_filters_() {
+  for (auto &channel_buffer : this->decimator_buffer_) {
+    channel_buffer.fill(0);
+  }
+  this->decimator_phase_ = 0;
+  this->decimator_valid_samples_ = 0;
+}
+
+size_t Sat1Microphone::decimate_and_filter_audio_(int32_t *samples, size_t frames, uint8_t channels) {
+  if (samples == nullptr || channels == 0) {
+    return 0;
+  }
+
+  channels = std::min<uint8_t>(channels, MAX_AUDIO_CHANNELS);
+
+  size_t output_frames = 0;
+
+  for (size_t frame = 0; frame < frames; ++frame) {
+    for (uint8_t channel = 0; channel < channels; ++channel) {
+      this->decimator_buffer_[channel][this->decimator_phase_] = samples[frame * channels + channel];
+    }
+
+    if (this->decimator_valid_samples_ < DECIMATION_FACTOR) {
+      ++this->decimator_valid_samples_;
+    }
+
+    this->decimator_phase_ = (this->decimator_phase_ + 1) % DECIMATION_FACTOR;
+
+    if ((this->decimator_phase_ == 0) && (this->decimator_valid_samples_ == DECIMATION_FACTOR)) {
+      for (uint8_t channel = 0; channel < channels; ++channel) {
+        int64_t accumulator = 0;
+        for (uint8_t tap = 0; tap < DECIMATION_FACTOR; ++tap) {
+          accumulator += static_cast<int64_t>(this->decimator_buffer_[channel][tap]) * DECIMATION_KERNEL[tap];
+        }
+        int32_t filtered_sample = static_cast<int32_t>(accumulator / DECIMATION_NORMALISATION);
+        samples[output_frames * channels + channel] = filtered_sample;
+      }
+      ++output_frames;
+    }
+  }
+
+  return output_frames;
+}
+
 
 void Sat1Microphone::mic_task(void *params) {
   Sat1Microphone *this_microphone = (Sat1Microphone *) params;
@@ -245,12 +297,29 @@ void Sat1Microphone::mic_task(void *params) {
       if (this_microphone->data_callbacks_.size() > 0) {
         samples.resize(bytes_to_read);
         size_t bytes_read = this_microphone->read_(samples.data(), bytes_to_read, 2 * pdMS_TO_TICKS(READ_DURATION_MS));
-        size_t samples_read = bytes_read / sizeof(int32_t);
-        int32_t* samples_32 = reinterpret_cast<int32_t*>(samples.data());
-        for (size_t i = 0; i < samples_read; i += 3) {
-          samples_32[i / 3] = samples_32[i];
+        if (bytes_read == 0) {
+          continue;
         }
-        samples.resize((samples_read / 3) * sizeof(int32_t));
+
+        uint8_t channel_count = static_cast<uint8_t>(this_microphone->audio_stream_info_.get_channels());
+        if (channel_count == 0) {
+          channel_count = 1;
+        }
+
+        size_t frames_read = (bytes_read / sizeof(int32_t)) / channel_count;
+        if (frames_read == 0) {
+          continue;
+        }
+
+        int32_t *samples_32 = reinterpret_cast<int32_t *>(samples.data());
+        size_t frames_written =
+            this_microphone->decimate_and_filter_audio_(samples_32, frames_read, channel_count);
+
+        if (frames_written == 0) {
+          continue;
+        }
+
+        samples.resize(frames_written * channel_count * sizeof(int32_t));
         if (this_microphone->correct_dc_offset_) {
           this_microphone->fix_dc_offset_(samples);
         }

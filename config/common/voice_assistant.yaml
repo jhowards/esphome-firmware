@@ -84,7 +84,7 @@ voice_assistant:
   microphone:
     microphone: sat1_mics
     channels: 0
-    gain_factor: 12
+    gain_factor: 6
   
   media_player: external_media_player
   micro_wake_word: mww

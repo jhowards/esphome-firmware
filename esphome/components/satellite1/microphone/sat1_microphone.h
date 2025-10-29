@@ -5,6 +5,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+#include <array>
+
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/core/component.h"
@@ -45,8 +47,17 @@ class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public 
 
   /// @brief Sets the Microphone ``audio_stream_info_`` member variable to the configured I2S settings.
   void configure_stream_settings_();
+  void reset_filters_();
+  size_t decimate_and_filter_audio_(int32_t *samples, size_t frames, uint8_t channels);
 
   static void mic_task(void *params);
+
+  static constexpr uint8_t MAX_AUDIO_CHANNELS = 2;
+  static constexpr uint8_t DECIMATION_FACTOR = 3;
+
+  std::array<std::array<int32_t, DECIMATION_FACTOR>, MAX_AUDIO_CHANNELS> decimator_buffer_{};
+  uint8_t decimator_phase_{0};
+  uint8_t decimator_valid_samples_{0};
 
   SemaphoreHandle_t active_listeners_semaphore_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
