@@ -37,10 +37,6 @@ microphone:
 micro_wake_word:
   id: mww
   models:
-    - model: hey_jarvis
-      id: hey_jarvis
-    - model: okay_nabu
-      id: okay_nabu    
     - model: alexa
       id: alexa
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
@@ -77,15 +73,6 @@ micro_wake_word:
                           .set_announcement(true)
                           .perform();
                     else:
-                      - if:
-                          condition:
-                            switch.is_on: wake_sound
-                          then:
-                            - script.execute:
-                                id: play_sound
-                                priority: true
-                                sound_file: !lambda return id(wake_word_triggered_sound);
-                            - delay: 300ms
                       - voice_assistant.start:
                           wake_word: !lambda return wake_word;
 
