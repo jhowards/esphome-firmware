@@ -47,7 +47,7 @@ micro_wake_word:
   microphone:
     microphone: sat1_mics
     channels: 1
-    gain_factor: 6
+    gain_factor: 12
   stop_after_detection: false
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
@@ -84,12 +84,13 @@ voice_assistant:
   microphone:
     microphone: sat1_mics
     channels: 0
+    gain_factor: 12
   
   media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false
-  noise_suppression_level: 2
-  auto_gain: 15 dbfs
+  noise_suppression_level: 3
+  auto_gain: 20 dbfs
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
